@@ -242,7 +242,7 @@ Material *SceneParser::parseMaterial() {
     Vector3f diffuseColor(1, 1, 1), specularColor(0, 0, 0);
     float shininess = 0, refr_rate = 0;
 
-    Vector3f type_d_rl_rr(1,0,0);
+    Vector3f type_d_rl_rr(1,0,0), emissionColor(0,0,0);
     getToken(token);
     assert (!strcmp(token, "{"));
     while (true) {
@@ -262,12 +262,14 @@ Material *SceneParser::parseMaterial() {
             printf("type_d_rl_rr: %f %f %f\n", type_d_rl_rr.x(), type_d_rl_rr.y(), type_d_rl_rr.z());
         } else if (strcmp(token, "refr_rate") == 0){
             refr_rate = readFloat();
+        } else if (strcmp(token, "emission") == 0) {
+            emissionColor = readVector3f();
         } else {
             assert (!strcmp(token, "}"));
             break;
         }
     }
-    auto *answer = new Material(diffuseColor, specularColor, shininess, type_d_rl_rr, refr_rate);
+    auto *answer = new Material(diffuseColor, specularColor, shininess, type_d_rl_rr, refr_rate, emissionColor);
     return answer;
 }
 

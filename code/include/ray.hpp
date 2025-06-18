@@ -37,7 +37,6 @@ public:
         origin = orig;
     }
 
-private:
 
     Vector3f origin;
     Vector3f direction;

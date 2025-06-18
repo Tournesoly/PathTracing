@@ -15,8 +15,8 @@
 class Material {
 public:
 
-    explicit Material(const Vector3f &d_color, const Vector3f &s_color = Vector3f::ZERO, float s = 0, const Vector3f &type_d_rl_rr = Vector3f(1,0,0), float refr_rate = 0) :
-            diffuseColor(d_color), specularColor(s_color), shininess(s), type_d_rl_rr(type_d_rl_rr), refr_rate(refr_rate) {
+    explicit Material(const Vector3f &d_color, const Vector3f &s_color = Vector3f::ZERO, float s = 0, const Vector3f &type_d_rl_rr = Vector3f(1,0,0), float refr_rate = 0, const Vector3f &emissionColor = Vector3f::ZERO) :
+            diffuseColor(d_color), specularColor(s_color), shininess(s), type_d_rl_rr(type_d_rl_rr), refr_rate(refr_rate), emissionColor(emissionColor) {
 
     }
 
@@ -60,10 +60,10 @@ public:
     Vector3f specularColor; // 镜面反射颜色
     float shininess; // 高光指数
 
-    // whitted style 漫反射 反射 折射
-    Vector3f type_d_rl_rr;
+    Vector3f type_d_rl_rr;// whitted style 漫反射 反射 折射
+    float refr_rate; // 折射率
 
-    float refr_rate;
+    Vector3f emissionColor; // 自发光颜色
 
 
     
