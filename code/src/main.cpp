@@ -22,13 +22,14 @@ int main(int argc, char *argv[]) {
         std::cout << "Argument " << argNum << " is: " << argv[argNum] << std::endl;
     }
 
-    if (argc != 4) {
-        cout << "Usage: ./bin/PA1 <input scene file> <output bmp file>" << endl;
+    if (argc != 5) {
+        cout << "Usage: ./bin/PA1 <input scene file> <output bmp file> type spp" << endl;
         return 1;
     }
     string inputFile = argv[1];
     string outputFile = argv[2];  // only bmp is allowed.
     string tracerType = argv[3];
+    int samplesPerPixel = atoi(argv[4]);
 
     // TODO: Main RayCasting Logic
     // First, parse the scene using SceneParser.
@@ -39,7 +40,7 @@ int main(int argc, char *argv[]) {
     SceneParser sceneParser(inputFile.c_str());
 
     int maxDepth = 10;            // 默认最大递归深度
-    int samplesPerPixel = 50;    // 默认采样数（仅用于路径追踪）
+
     if (tracerType == "raycast") {
         RayCastTracer tracer(&sceneParser, outputFile);
         tracer.render();
@@ -51,6 +52,9 @@ int main(int argc, char *argv[]) {
         tracer.render();
     } else if (tracerType == "nee") {
         NEEedPathTracer tracer(&sceneParser, samplesPerPixel, outputFile);
+        tracer.render();
+    }else if (tracerType == "glossy") {
+        GlossyPathTracer tracer(&sceneParser, samplesPerPixel, outputFile);
         tracer.render();
 
     } else {

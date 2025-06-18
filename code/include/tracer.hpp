@@ -181,6 +181,37 @@ Vector3f glossyDir(const Vector3f& In, const Vector3f& normal, float shininess) 
     return reflectDir.normalized();
 }
 
+Vector3f glossy_BRDF(const Vector3f & normal, const Vector3f &viewDir, const Vector3f &lightDir, const Vector3f &baseReflectance, float glossiness){
+    Vector3f halfVector = (viewDir + lightDir).normalized();
+
+    // 1. Fresnel 项：Schlick 近似
+    float cosThetaH = std::max(0.0f, Vector3f::dot(viewDir, halfVector));
+    Vector3f fresnelTerm = baseReflectance + (Vector3f(1.0f, 1.0f, 1.0f) - baseReflectance) * std::pow(std::max(0.0f, 1.0f - cosThetaH), 5.0f);
+
+    // 2. 几何项：Smith 模型 (Schlick-GGX)
+    float roughness = 1.0f - glossiness; // 粗糙度 = 1 - 光泽度
+    float k = (roughness * roughness) / 2.0f;
+    float cosThetaV = std::max(0.0f, Vector3f::dot(normal, viewDir));
+    float cosThetaL = std::max(0.0f, Vector3f::dot(normal, lightDir));
+    float geomView = cosThetaV / (cosThetaV * (1.0f - k) + k + 1e-6f);
+    float geomLight = cosThetaL / (cosThetaL * (1.0f - k) + k + 1e-6f);
+    float geometryTerm = geomView * geomLight;
+
+    // 3. 分布项：GGX 微表面分布
+    float cosThetaN = std::max(0.0f, Vector3f::dot(normal, halfVector));
+    float roughnessSquared = roughness * roughness;
+    float cosThetaNSquared = cosThetaN * cosThetaN;
+    float denominator = (cosThetaNSquared * (roughnessSquared - 1.0f) + 1.0f) * (cosThetaNSquared * (roughnessSquared - 1.0f) + 1.0f) + 1e-6f;
+    float distributionTerm = roughnessSquared / (M_PI * denominator);
+
+    // 归一化并计算最终 BRDF
+    float normalization = 4.0f * cosThetaV * cosThetaL + 1e-7f;
+    Vector3f specular = fresnelTerm * geometryTerm * distributionTerm / normalization;
+
+    return specular;
+
+}
+
 class RayCastTracer {
 public:
     RayCastTracer(const SceneParser* sceneParser, const string& outputFile) : _sceneParser(sceneParser), _outputFile(outputFile){};
@@ -225,7 +256,6 @@ private:
     const string &_outputFile;
 
 };
-
 
 // ========================
 // Whitted 风格光线追踪器
@@ -313,8 +343,6 @@ private:
     int _maxDepth;
     string _outputFile;
 };
-
-
 
 // ========================
 // 简单路径追踪器（基础 Path Tracer）
@@ -405,16 +433,6 @@ private:
 
 };
 
-
-// 夹到0-10之间，防止过亮像素
-Vector3f clamp(Vector3f v){
-    int num = 10;
-    float v0 = v[0] > num ? num : v[0];
-    float v1 = v[1] > num ? num : v[1];
-    float v2 = v[2] > num ? num : v[2];
-    return Vector3f(v0, v1, v2);
-}
-
 // ========================
 // 带下一事件估计（NEE）的路径追踪器
 // ========================
@@ -439,9 +457,6 @@ public:
             Vector3f input = ray.direction.normalized();
             Vector3f emitted = material->emissionColor;
             Vector3f diffuse = material->diffuseColor;
-
-
-
 
             // nee
             if (material->type_d_rl_rr.x() != 0) {
@@ -483,14 +498,18 @@ public:
 
             double rate = RandNum();
             Vector3f type = material->type_d_rl_rr;
-
-            if (rate <= type.x()) {// 漫反射
-                ray.direction = diffuseDir(normal);
-            } else if (rate <= type.x() + type.y()) {// 镜面反射
-                ray.direction = reflectDir(ray.direction, normal);
-            } else {// 折射
-                ray.direction = refractDir(ray.direction, normal, material->refr_rate);
+            Vector3f newdir;
+            if (material->shininess){// 处理 glossy 材质
+                // newdir = glossyDir(ray.direction, normal, material->shininess);
+            } else if (rate <= type.x()) { // 漫反射
+                newdir = diffuseDir(normal);
+            } else if (rate <= type.x() + type.y()) { // 反射
+                newdir = reflectDir(ray.direction, normal);
+            } else { // 折射
+                newdir = refractDir(ray.direction, normal, material->refr_rate);
             }
+
+            ray.direction = newdir;
 
             if (type.x() != 0) {
                 throughput *= std::abs(Vector3f::dot(ray.direction, normal));
@@ -542,8 +561,6 @@ private:
 
 };
 
-
-
 // ========================
 // 实现 glossy 材质的路径追踪器
 // ========================
@@ -569,26 +586,67 @@ public:
             Vector3f emitted = material->emissionColor;
             Vector3f diffuse = material->diffuseColor;
 
-            color += diffuse * emitted * throughput;
-            throughput = throughput * diffuse;
+            // nee
+            if (material->type_d_rl_rr.x() != 0) {
+                if (emitted.x() == 0 && emitted.y() == 0 && emitted.z() == 0) {
+                    int numLights = _sceneParser->getNumEmissions();
+                    if (numLights > 0) {
+                        int lightIdx = std::floor(RandNum() * numLights);
+                        PointLight* light = _sceneParser->getLightFromEmission(lightIdx);
 
-            ray.origin = hitPoint;
+                        Vector3f lightDir, lightColor;
+                        float lightDist;
+                        light->getIllumination(hitPoint, lightDir, lightColor, lightDist);
+
+                        // 修正影子光线方向
+                        Vector3f toLight = lightDir * lightDist;
+                        Ray shadowRay(hitPoint, lightDir);
+                        Hit shadowHit;
+                        bool occluded = _sceneParser->getGroup()->intersect(shadowRay, shadowHit, 0.005f);
+
+                        if (!occluded || shadowHit.getT() >= lightDist - 0.05f) {
+                            float cosTheta = std::max(0.0f, Vector3f::dot(normal, lightDir));
+                            if (cosTheta > 0) {
+                                float lightCosTheta = std::max(0.0f, Vector3f::dot(-lightDir, light->normal));
+                                if (lightCosTheta > 0) {
+                                    float geoTerm = cosTheta * lightCosTheta / (lightDist * lightDist + 1e-6f);
+                                    float lightPdf = (light->area > 0) ? 1.0f / (numLights * light->area + 1e-6f) : 1.0f / (numLights * 1.0f + 1e-6f);
+                                    color += lightColor * diffuse * geoTerm * throughput / lightPdf / M_PI;
+                                }
+                            }
+                        }
+                        delete light;
+                    }
+                } else {
+                    // 自发光表面贡献
+                    color += diffuse * emitted * throughput / M_PI;
+                    // 漫反射时乘以 1/π 归一化 BRDF
+                }
+            }
+
             double rate = RandNum();
             Vector3f type = material->type_d_rl_rr;
             Vector3f newdir;
             if (material->shininess){// 处理 glossy 材质
-                ray.direction = glossyDir(ray.direction, normal, material->shininess);
+                newdir = glossyDir(ray.direction, normal, material->shininess);
+                Vector3f specular = glossy_BRDF(normal, -input, newdir, diffuse, material->shininess);
+                throughput = throughput * specular; // 更新通量
             } else if (rate <= type.x()) { // 漫反射
-                ray.direction = diffuseDir(normal);
+                newdir = diffuseDir(normal);
             } else if (rate <= type.x() + type.y()) { // 反射
-                ray.direction = reflectDir(ray.direction, normal);
+                newdir = reflectDir(ray.direction, normal);
             } else { // 折射
-                ray.direction = refractDir(ray.direction, normal, material->refr_rate);
+                newdir = refractDir(ray.direction, normal, material->refr_rate);
             }
+
+            ray.direction = newdir;
 
             if (type.x() != 0) {
                 throughput *= std::abs(Vector3f::dot(ray.direction, normal));
             }
+
+            throughput = throughput * diffuse;
+            ray.origin = hitPoint;
 
             // 俄罗斯轮盘赌
             float q = 0.1f; // 固定终止概率，可动态调整
@@ -598,8 +656,7 @@ public:
             }
             throughput = throughput / (1 - q); // 补偿继续概率
         }
-        if (color.x() < 0 || color.y() < 0 || color.z() < 0) return Vector3f(0,0,0);
-        return clamp(color);
+        return color;
 
     }
 
