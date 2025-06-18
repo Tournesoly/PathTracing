@@ -41,6 +41,11 @@ public:
         h.set(t, material, dnormal);
         return true;
     }
+
+    PointLight* generateRandLight() override {
+        return new PointLight(Vector3f(0, 0, 0), material->emissionColor);
+    }
+
     float d;
     Vector3f normal;
     

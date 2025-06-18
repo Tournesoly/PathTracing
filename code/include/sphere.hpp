@@ -56,6 +56,10 @@ public:
         return true;
     }
 
+    PointLight* generateRandLight() override {
+        return new PointLight(Vector3f(0, 0, 0), material->emissionColor);
+    }
+
 protected:
     Vector3f center;
     float radius;

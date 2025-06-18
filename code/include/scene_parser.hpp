@@ -3,6 +3,8 @@
 
 #include <cassert>
 #include <vecmath.h>
+#include "object3d.hpp" // 添加此行，确保 Object3D 的定义可用
+#include "group.hpp"
 
 class Camera;
 class Light;
@@ -40,6 +42,15 @@ public:
     Light *getLight(int i) const {
         assert(i >= 0 && i < num_lights);
         return lights[i];
+    }
+
+    int getNumEmissions() const {
+        return group->getNumEmissions();
+    }
+
+    PointLight *getLightFromEmission(int i) const {
+        PointLight * light = group->getEmission(i);
+        return light;
     }
 
     int getNumMaterials() const {
@@ -85,6 +96,10 @@ private:
     Vector3f background_color;
     int num_lights;
     Light **lights;
+
+    int num_emissions;
+    std::vector<Object3D*> emission_objects;
+
     int num_materials;
     Material **materials;
     Material *current_material;

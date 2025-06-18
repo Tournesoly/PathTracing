@@ -10,27 +10,10 @@
 
 #include "group.hpp"
 #include "light.hpp"
+#include "utils.hpp"
 #include <cmath>
 
 using namespace std;
-
-#include <cstdlib>
-#include <ctime>
-
-// 初始化随机种子（只需在程序启动时调用一次）
-static bool seedInitialized = false;
-inline void initRand() {
-    if (!seedInitialized) {
-        srand(static_cast<unsigned int>(time(0))); // 使用当前时间作为种子
-        seedInitialized = true;
-    }
-}
-
-// 随机数生成函数
-inline double RandNum() {
-    initRand(); // 确保种子初始化
-    return static_cast<double>(rand()) / RAND_MAX; // 返回 [0, 1) 的随机数
-}
 
 
 Vector3f reflectDir(const Vector3f& I, const Vector3f& N) {
@@ -151,6 +134,51 @@ Vector3f diffuseDir(const Vector3f &normal) {
         worldDir = -worldDir; // 如果方向在下半球，反转
     }
     return worldDir.normalized();
+}
+
+
+// 生成 Glossy 反射方向 (Cook-Torrance 风格)
+Vector3f glossyDir(const Vector3f& In, const Vector3f& normal, float shininess) {
+    // 标准化输入向量
+    Vector3f incident = In.normalized();
+    Vector3f N = normal.normalized();
+
+    // 将 shininess 转换为粗糙度 (roughness)，值越小越光滑
+    float roughness = 1.0f / (shininess + 1.0f); // shininess = 0 -> roughness = 1 (扩散), shininess 大 -> roughness 趋近 0 (镜面)
+
+    // GGX 采样微表面法向量 H
+    float u1 = RandNum();
+    float u2 = RandNum();
+    float theta = std::atan(roughness * std::sqrt(u1) / std::sqrt(1.0f - u1)); // GGX 分布角度
+    float phi = 2.0 * M_PI * u2; // 方位角
+
+    float cosTheta = std::cos(theta);
+    float sinTheta = std::sin(theta);
+    float x = sinTheta * std::cos(phi);
+    float y = sinTheta * std::sin(phi);
+    float z = cosTheta;
+
+    // 局部半向量
+    Vector3f H_local(x, y, z);
+
+    // 构造局部坐标系
+    Vector3f w = N; // 法线作为 z 轴
+    Vector3f u = Vector3f::cross(std::abs(w.x()) > 0.1f ? Vector3f(0, 1, 0) : Vector3f(1, 0, 0), w).normalized();
+    Vector3f v = Vector3f::cross(w, u).normalized();
+
+    // 将 H 转换到世界坐标系
+    Vector3f H = u * H_local.x() + v * H_local.y() + w * H_local.z();
+
+    // 计算反射方向 R = I - 2 * (I · H) * H
+    double dotIH = Vector3f::dot(incident, H);
+    Vector3f reflectDir = incident - 2.0 * dotIH * H;
+
+    // 确保方向在法线半球内
+    if (Vector3f::dot(reflectDir, N) < 0) {
+        reflectDir = -reflectDir;
+    }
+
+    return reflectDir.normalized();
 }
 
 class RayCastTracer {
@@ -293,7 +321,7 @@ private:
 // ========================
 class SimplePathTracer {
 public:
-    SimplePathTracer(const SceneParser* sceneParser, const string& outputFile): _sceneParser(sceneParser), _outputFile(outputFile){};
+    SimplePathTracer(const SceneParser* sceneParser,int SPP, const string& outputFile): _sceneParser(sceneParser), _SPP(SPP), _outputFile(outputFile){};
 
     Vector3f trace(Ray ray) {
         Vector3f color = Vector3f::ZERO;
@@ -350,20 +378,18 @@ public:
         int height = camera->getHeight();
         Image image = Image(width, height);
 
-        int samplesPerPixel = 1000;
-
         for (int x = 0; x < width; x++) {
             for (int y = 0; y < height; y++) {
                 Vector3f finalColor(0, 0, 0);
-                for (int s = 0; s < samplesPerPixel; s++) {
+                for (int s = 0; s < _SPP; s++) {
                     float u = (x + RandNum());
                     float v = (y + RandNum());
                     Ray ray = camera->generateRay(Vector2f(u, v));
                     finalColor += trace(ray);
                 }
-                finalColor[0] /= samplesPerPixel;
-                finalColor[1] /= samplesPerPixel;
-                finalColor[2] /= samplesPerPixel;
+                finalColor[0] /= _SPP;
+                finalColor[1] /= _SPP;
+                finalColor[2] /= _SPP;
                 image.SetPixel(x, y, finalColor);
             }
         }
@@ -374,31 +400,239 @@ public:
 
 private:
     const SceneParser* _sceneParser;
+    int _SPP = 100;
     std::string _outputFile;
 
 };
+
+
+// 夹到0-10之间，防止过亮像素
+Vector3f clamp(Vector3f v){
+    int num = 10;
+    float v0 = v[0] > num ? num : v[0];
+    float v1 = v[1] > num ? num : v[1];
+    float v2 = v[2] > num ? num : v[2];
+    return Vector3f(v0, v1, v2);
+}
 
 // ========================
 // 带下一事件估计（NEE）的路径追踪器
 // ========================
 class NEEedPathTracer {
 public:
-    NEEedPathTracer(const SceneParser* scene, int maxDepth, int samplesPerPixel, const std::string& outputFile);
+    NEEedPathTracer(const SceneParser* sceneParser,int SPP, const string& outputFile): _sceneParser(sceneParser), _SPP(SPP), _outputFile(outputFile){};
 
-    Vector3f traced(Ray ray, int depth){
+    Vector3f trace(Ray ray) {
+        Vector3f color = Vector3f::ZERO;
+        Vector3f throughput = Vector3f(1, 1, 1);
 
+        while (true) {
+            Hit hit;
+            if (!_sceneParser->getGroup()->intersect(ray, hit, 0.001f)) {
+                color += _sceneParser->getBackgroundColor() * throughput;
+                break;
+            }
+
+            Material* material = hit.getMaterial();
+            Vector3f hitPoint = ray.pointAtParameter(hit.getT());
+            Vector3f normal = hit.getNormal().normalized();
+            Vector3f input = ray.direction.normalized();
+            Vector3f emitted = material->emissionColor;
+            Vector3f diffuse = material->diffuseColor;
+
+
+
+
+            // nee
+            if (material->type_d_rl_rr.x() != 0) {
+                if (emitted.x() == 0 && emitted.y() == 0 && emitted.z() == 0) {
+                    int numLights = _sceneParser->getNumEmissions();
+                    if (numLights > 0) {
+                        int lightIdx = std::floor(RandNum() * numLights);
+                        PointLight* light = _sceneParser->getLightFromEmission(lightIdx);
+
+                        Vector3f lightDir, lightColor;
+                        float lightDist;
+                        light->getIllumination(hitPoint, lightDir, lightColor, lightDist);
+
+                        // 修正影子光线方向
+                        Vector3f toLight = lightDir * lightDist;
+                        Ray shadowRay(hitPoint, lightDir);
+                        Hit shadowHit;
+                        bool occluded = _sceneParser->getGroup()->intersect(shadowRay, shadowHit, 0.005f);
+
+                        if (!occluded || shadowHit.getT() >= lightDist - 0.05f) {
+                            float cosTheta = std::max(0.0f, Vector3f::dot(normal, lightDir));
+                            if (cosTheta > 0) {
+                                float lightCosTheta = std::max(0.0f, Vector3f::dot(-lightDir, light->normal));
+                                if (lightCosTheta > 0) {
+                                    float geoTerm = cosTheta * lightCosTheta / (lightDist * lightDist + 1e-6f);
+                                    float lightPdf = (light->area > 0) ? 1.0f / (numLights * light->area + 1e-6f) : 1.0f / (numLights * 1.0f + 1e-6f);
+                                    color += lightColor * diffuse * geoTerm * throughput / lightPdf / M_PI;
+                                }
+                            }
+                        }
+                        delete light;
+                    }
+                } else {
+                    // 自发光表面贡献
+                    color += diffuse * emitted * throughput / M_PI;
+                    // 漫反射时乘以 1/π 归一化 BRDF
+                }
+            }
+
+            double rate = RandNum();
+            Vector3f type = material->type_d_rl_rr;
+
+            if (rate <= type.x()) {// 漫反射
+                ray.direction = diffuseDir(normal);
+            } else if (rate <= type.x() + type.y()) {// 镜面反射
+                ray.direction = reflectDir(ray.direction, normal);
+            } else {// 折射
+                ray.direction = refractDir(ray.direction, normal, material->refr_rate);
+            }
+
+            if (type.x() != 0) {
+                throughput *= std::abs(Vector3f::dot(ray.direction, normal));
+            }
+
+            throughput = throughput * diffuse;
+            ray.origin = hitPoint;
+
+            // 俄罗斯轮盘赌
+            float q = 0.1f;
+            double rouletteRand = RandNum();
+            if (rouletteRand < q) {
+                break;
+            }
+            throughput = throughput / (1 - q);
+        }
+        return color;
     }
     void render(){
-        
+        Camera* camera = _sceneParser->getCamera();
+        int width = camera->getWidth();
+        int height = camera->getHeight();
+        Image image = Image(width, height);
+
+        for (int x = 0; x < width; x++) {
+            for (int y = 0; y < height; y++) {
+                Vector3f finalColor(0, 0, 0);
+                for (int s = 0; s < _SPP; s++) {
+                    float u = (x + RandNum());
+                    float v = (y + RandNum());
+                    Ray ray = camera->generateRay(Vector2f(u, v));
+                    finalColor += trace(ray);
+                }
+                finalColor[0] /= _SPP;
+                finalColor[1] /= _SPP;
+                finalColor[2] /= _SPP;
+                image.SetPixel(x, y, finalColor);
+            }
+        }
+
+        image.SaveBMP(_outputFile.c_str());
+        printf("SimplePathTracing: Finished rendering %s\n", _outputFile.c_str());
     }
 
 private:
-    const SceneParser* scene;
-    int maxDepth;
-    int samplesPerPixel;
-    std::string outputFile;
-
+    const SceneParser* _sceneParser;
+    int _SPP = 100;
+    std::string _outputFile;
 
 };
 
+
+
+// ========================
+// 实现 glossy 材质的路径追踪器
+// ========================
+class GlossyPathTracer {
+public:
+    GlossyPathTracer(const SceneParser* sceneParser, int SPP, const string& outputFile): _sceneParser(sceneParser), _SPP(SPP), _outputFile(outputFile){};
+
+    Vector3f trace(Ray ray) {
+        Vector3f color = Vector3f::ZERO;
+        Vector3f throughput = Vector3f(1, 1, 1);
+
+        while (true) {
+            Hit hit;
+            if (!_sceneParser->getGroup()->intersect(ray, hit, 0.001f)) {
+                color += _sceneParser->getBackgroundColor() * throughput;
+                break;
+            }
+
+            Material* material = hit.getMaterial();
+            Vector3f hitPoint = ray.pointAtParameter(hit.getT());
+            Vector3f normal = hit.getNormal().normalized();
+            Vector3f input = ray.direction.normalized();
+            Vector3f emitted = material->emissionColor;
+            Vector3f diffuse = material->diffuseColor;
+
+            color += diffuse * emitted * throughput;
+            throughput = throughput * diffuse;
+
+            ray.origin = hitPoint;
+            double rate = RandNum();
+            Vector3f type = material->type_d_rl_rr;
+            Vector3f newdir;
+            if (material->shininess){// 处理 glossy 材质
+                ray.direction = glossyDir(ray.direction, normal, material->shininess);
+            } else if (rate <= type.x()) { // 漫反射
+                ray.direction = diffuseDir(normal);
+            } else if (rate <= type.x() + type.y()) { // 反射
+                ray.direction = reflectDir(ray.direction, normal);
+            } else { // 折射
+                ray.direction = refractDir(ray.direction, normal, material->refr_rate);
+            }
+
+            if (type.x() != 0) {
+                throughput *= std::abs(Vector3f::dot(ray.direction, normal));
+            }
+
+            // 俄罗斯轮盘赌
+            float q = 0.1f; // 固定终止概率，可动态调整
+            double rouletteRand = RandNum(); // 新生成的随机数
+            if (rouletteRand < q) { // 以概率 q 终止
+                break;
+            }
+            throughput = throughput / (1 - q); // 补偿继续概率
+        }
+        if (color.x() < 0 || color.y() < 0 || color.z() < 0) return Vector3f(0,0,0);
+        return clamp(color);
+
+    }
+
+    void render(){
+        Camera* camera = _sceneParser->getCamera();
+        int width = camera->getWidth();
+        int height = camera->getHeight();
+        Image image = Image(width, height);
+
+        for (int x = 0; x < width; x++) {
+            for (int y = 0; y < height; y++) {
+                Vector3f finalColor(0, 0, 0);
+                for (int s = 0; s < _SPP; s++) {
+                    float u = (x + RandNum());
+                    float v = (y + RandNum());
+                    Ray ray = camera->generateRay(Vector2f(u, v));
+                    finalColor += trace(ray);
+                }
+                finalColor[0] /= _SPP;
+                finalColor[1] /= _SPP;
+                finalColor[2] /= _SPP;
+                image.SetPixel(x, y, finalColor);
+            }
+        }
+
+        image.SaveBMP(_outputFile.c_str());
+        printf("SimplePathTracing: Finished rendering %s\n", _outputFile.c_str());
+    }
+
+private:
+    const SceneParser* _sceneParser;
+    int _SPP = 100;
+    std::string _outputFile;
+
+};
 #endif // TRACER_HPP

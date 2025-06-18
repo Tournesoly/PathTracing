@@ -4,6 +4,9 @@
 #include "ray.hpp"
 #include "hit.hpp"
 #include "material.hpp"
+#include "utils.hpp"
+#include "light.hpp"
+
 
 // Base class for all 3d entities.
 class Object3D {
@@ -18,7 +21,8 @@ public:
 
     // Intersect Ray with this object. If hit, store information in hit structure.
     virtual bool intersect(const Ray &r, Hit &h, float tmin) = 0;
-protected:
+
+    virtual PointLight *generateRandLight() = 0;
 
     Material *material;
 };

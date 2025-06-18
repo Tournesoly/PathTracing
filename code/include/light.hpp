@@ -11,6 +11,11 @@ public:
     virtual ~Light() = default;
 
     virtual void getIllumination(const Vector3f &p, Vector3f &dir, Vector3f &col, float &lightDist) const = 0;
+    
+    Vector3f position;
+    Vector3f normal; // 用于nee 面光源的normal
+    float area; //同 用于 nee
+
 };
 
 
@@ -39,6 +44,8 @@ private:
 
     Vector3f direction;
     Vector3f color;
+    Vector3f normal; // 用于nee 面光源的normal
+    float area; //同 用于 nee
 
 };
 
@@ -49,6 +56,10 @@ public:
     PointLight(const Vector3f &p, const Vector3f &c) {
         position = p;
         color = c;
+    }
+
+    PointLight(const Vector3f &p, const Vector3f &c, const Vector3f &n, float &a):position(p), color(c), normal(n), area(a) {
+
     }
 
     ~PointLight() override = default;
@@ -63,10 +74,12 @@ public:
         col = color;
     }
 
-private:
+
 
     Vector3f position;
     Vector3f color;
+    Vector3f normal; // 用于nee 面光源的normal
+    float area; //同 用于 nee
 
 };
 

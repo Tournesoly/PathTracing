@@ -38,8 +38,8 @@ int main(int argc, char *argv[]) {
     // pixel in your output image.
     SceneParser sceneParser(inputFile.c_str());
 
-    int maxDepth = 100;            // 默认最大递归深度
-    int samplesPerPixel = 16;    // 默认采样数（仅用于路径追踪）
+    int maxDepth = 10;            // 默认最大递归深度
+    int samplesPerPixel = 50;    // 默认采样数（仅用于路径追踪）
     if (tracerType == "raycast") {
         RayCastTracer tracer(&sceneParser, outputFile);
         tracer.render();
@@ -47,12 +47,11 @@ int main(int argc, char *argv[]) {
         WhittedStyleTracer tracer(&sceneParser, maxDepth, outputFile);
         tracer.render();
     } else if (tracerType == "simple") {
-        SimplePathTracer tracer(&sceneParser, outputFile);
+        SimplePathTracer tracer(&sceneParser, samplesPerPixel, outputFile);
         tracer.render();
-
-    // } else if (tracerType == "nee") {
-    //     NEEedPathTracer tracer(&sceneParser, maxDepth, samplesPerPixel, outputFile);
-    //     tracer.render();
+    } else if (tracerType == "nee") {
+        NEEedPathTracer tracer(&sceneParser, samplesPerPixel, outputFile);
+        tracer.render();
 
     } else {
         cerr << "Unknown tracer type: " << tracerType << endl;

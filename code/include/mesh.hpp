@@ -27,6 +27,10 @@ public:
     std::vector<Vector3f> n;
     bool intersect(const Ray &r, Hit &h, float tmin) override;
 
+    PointLight* generateRandLight() override {
+        return new PointLight(Vector3f(0, 0, 0), material->emissionColor);
+    }
+
 private:
 
     // Normal can be used for light estimation

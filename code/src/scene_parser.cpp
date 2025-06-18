@@ -25,6 +25,9 @@ SceneParser::SceneParser(const char *filename) {
     background_color = Vector3f(0.5, 0.5, 0.5);
     num_lights = 0;
     lights = nullptr;
+
+    num_emissions = 0;
+
     num_materials = 0;
     materials = nullptr;
     current_material = nullptr;
@@ -333,6 +336,12 @@ Group *SceneParser::parseGroup() {
             Object3D *object = parseObject(token);
             assert (object != nullptr);
             answer->addObject(count, object);
+
+            if (object->material->emissionColor.x() != 0 || object->material->emissionColor.y() != 0 || object->material->emissionColor.z() != 0){
+                num_emissions ++;
+                emission_objects.push_back(object);
+            }
+
 
             count++;
         }

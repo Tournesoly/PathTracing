@@ -36,6 +36,10 @@ public:
         return inter;
     }
 
+    PointLight* generateRandLight() override {
+        return new PointLight(Vector3f(0, 0, 0), material->emissionColor);
+    }
+
 protected:
     Object3D *o; //un-transformed object
     Matrix4f transform;
