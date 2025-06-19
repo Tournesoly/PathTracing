@@ -22,6 +22,8 @@ public:
     // Intersect Ray with this object. If hit, store information in hit structure.
     virtual bool intersect(const Ray &r, Hit &h, float tmin) = 0;
 
+    virtual bool intersect_with_tree(const Ray &r, Hit &h, float tmin) = 0;
+
     virtual PointLight *generateRandLight() = 0;
 
     Material *material;

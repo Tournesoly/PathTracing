@@ -27,7 +27,10 @@ public:
     std::vector<Vector3f> n;
     bool intersect(const Ray &r, Hit &h, float tmin) override;
 
-    PointLight* generateRandLight() override {
+    
+    bool intersect_with_tree(const Ray &r, Hit &h, float tmin) override{
+        return false;
+    }    PointLight* generateRandLight() override {
         return new PointLight(Vector3f(0, 0, 0), material->emissionColor);
     }
 

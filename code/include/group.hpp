@@ -37,6 +37,10 @@ public:
         return intersected;
     }
 
+    bool intersect_with_tree(const Ray &r, Hit &h, float tmin) override {
+        return false;
+    }
+
     PointLight* generateRandLight() override {
         printf("Generate a random light in group\n");
         return new PointLight(Vector3f(0, 0, 0), material->emissionColor);
