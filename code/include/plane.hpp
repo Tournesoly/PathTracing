@@ -42,12 +42,15 @@ public:
         return true;
     }
 
-    bool intersect_with_tree(const Ray &r, Hit &h, float tmin) override{
-        return false;
-    }
+
     PointLight* generateRandLight() override {
         return new PointLight(Vector3f(0, 0, 0), material->emissionColor);
     }
+
+    BoundingVolume generateBoxFromObject() override {
+        return BoundingVolume(Vector3f(-INFINITY, -INFINITY, -INFINITY), Vector3f(INFINITY, INFINITY, INFINITY));
+    }   
+
 
     float d;
     Vector3f normal;

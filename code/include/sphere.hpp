@@ -56,12 +56,18 @@ public:
         return true;
     }
 
-    bool intersect_with_tree(const Ray &r, Hit &h, float tmin) override{
-        return false;
-    }
+
     PointLight* generateRandLight() override {
         return new PointLight(Vector3f(0, 0, 0), material->emissionColor);
     }
+
+    BoundingVolume generateBoxFromObject() override {
+        // 球的 AABB 由中心点和半径决定
+        Vector3f minPoint = center - Vector3f(radius, radius, radius);
+        Vector3f maxPoint = center + Vector3f(radius, radius, radius);
+        return BoundingVolume(minPoint, maxPoint);
+    }
+
 
 protected:
     Vector3f center;

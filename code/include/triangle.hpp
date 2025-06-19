@@ -57,9 +57,7 @@ public:
         return true;
 	}
 
-    bool intersect_with_tree(const Ray &r, Hit &h, float tmin) override{
-        return false;
-    }
+
     PointLight* generateRandLight() override {
 
 
@@ -85,6 +83,52 @@ public:
         return new PointLight(randomPoint, material->emissionColor, normal.normalized(), area);
     }
 
+    // BoundingVolume generateBoxFromObject() override {
+    //     // 计算三角形顶点的最小和最大坐标
+    //     Vector3f minPoint = vertices[0];
+    //     Vector3f maxPoint = vertices[0];
+
+    //     for (int i = 1; i < 3; ++i) {
+    //         minPoint = Vector3f(
+    //             std::min(minPoint.x(), vertices[i].x()),
+    //             std::min(minPoint.y(), vertices[i].y()),
+    //             std::min(minPoint.z(), vertices[i].z())
+    //         );
+    //         maxPoint = Vector3f(
+    //             std::max(maxPoint.x(), vertices[i].x()),
+    //             std::max(maxPoint.y(), vertices[i].y()),
+    //             std::max(maxPoint.z(), vertices[i].z())
+    //         );
+    //     }
+
+    //     return BoundingVolume(minPoint, maxPoint);
+    // }
+
+	// 防止包围盒没有厚度，保证各维度有差值
+	BoundingVolume generateBoxFromObject() override {
+		float minx = std::min({vertices[0].x(), vertices[1].x(), vertices[2].x()});
+		float miny = std::min({vertices[0].y(), vertices[1].y(), vertices[2].y()});
+		float minz = std::min({vertices[0].z(), vertices[1].z(), vertices[2].z()});
+		float maxx = std::max({vertices[0].x(), vertices[1].x(), vertices[2].x()});
+		float maxy = std::max({vertices[0].y(), vertices[1].y(), vertices[2].y()});
+		float maxz = std::max({vertices[0].z(), vertices[1].z(), vertices[2].z()});
+		if (minx == maxx) {
+			minx -= 0.001f;
+			maxx += 0.001f;
+		}
+		if (miny == maxy) {
+			miny -= 0.001f;
+			maxy += 0.001f;
+		}
+		if (minz == maxz) {
+			minz -= 0.001f;
+			maxz += 0.001f;
+		}
+		Vector3f min(minx, miny, minz);
+		Vector3f max(maxx, maxy, maxz);
+
+		return BoundingVolume(min, max);
+	}
 
 	Vector3f normal;
 	Vector3f vertices[3];

@@ -327,26 +327,34 @@ Group *SceneParser::parseGroup() {
     int count = 0;
     while (num_objects > count) {
         getToken(token);
+        printf("num_objects: %d, count: %d\n", num_objects, count);
         if (!strcmp(token, "MaterialIndex")) {
             // change the current material
             int index = readInt();
+            printf("MaterialIndex %d\n", index);
             assert (index >= 0 && index <= getNumMaterials());
             current_material = getMaterial(index);
+            printf("current_material: %p\n", current_material);
         } else {
+            printf("Unknown token in parseObject: '%s'\n", token);
             Object3D *object = parseObject(token);
+            printf("Object %s\n", token);
             assert (object != nullptr);
             answer->addObject(count, object);
-
+            printf("1\n");
             if (object->material->emissionColor.x() != 0 || object->material->emissionColor.y() != 0 || object->material->emissionColor.z() != 0){
+                printf("Emission\n");
                 num_emissions ++;
                 emission_objects.push_back(object);
+                printf("Emission object added\n");
             }
-
+            printf("2\n");
 
             count++;
         }
     }
     getToken(token);
+    printf("token = %s\n", token);
     assert (!strcmp(token, "}"));
 
     // return the group
@@ -423,7 +431,7 @@ Mesh *SceneParser::parseTriangleMesh() {
     const char *ext = &filename[strlen(filename) - 4];
     assert(!strcmp(ext, ".obj"));
     Mesh *answer = new Mesh(filename, current_material);
-
+    printf("Reading OBJ file %s...\n", filename);
     return answer;
 }
 
@@ -440,6 +448,7 @@ Transform *SceneParser::parseTransform() {
     getToken(token);
 
     while (true) {
+        printf("parsing token %s\n", token);
         if (!strcmp(token, "Scale")) {
             Vector3f s = readVector3f();
             matrix = matrix * Matrix4f::scaling(s[0], s[1], s[2]);
@@ -479,6 +488,7 @@ Transform *SceneParser::parseTransform() {
         } else {
             // otherwise this must be an object,
             // and there are no more transformations
+            printf("Parsing transformation matrix: %s\n", token);
             object = parseObject(token);
             break;
         }
@@ -487,6 +497,7 @@ Transform *SceneParser::parseTransform() {
 
     assert(object != nullptr);
     getToken(token);
+    printf("Parsing object: %s\n", token);
     assert (!strcmp(token, "}"));
     return new Transform(matrix, object);
 }

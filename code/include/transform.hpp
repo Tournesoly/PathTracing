@@ -20,12 +20,13 @@ public:
 
     Transform(const Matrix4f &m, Object3D *obj) : o(obj) {
         transform = m.inverse();
+        printf("transform matrix:\n");
     }
 
     ~Transform() {
     }
 
-    virtual bool intersect(const Ray &r, Hit &h, float tmin) {
+    virtual bool intersect(const Ray &r, Hit &h, float tmin) override {
         Vector3f trSource = transformPoint(transform, r.getOrigin());
         Vector3f trDirection = transformDirection(transform, r.getDirection());
         Ray tr(trSource, trDirection);
@@ -36,13 +37,16 @@ public:
         return inter;
     }
 
-    bool intersect_with_tree(const Ray &r, Hit &h, float tmin) override{
-        return false;
-    }
+
    
     PointLight* generateRandLight() override {
         return new PointLight(Vector3f(0, 0, 0), material->emissionColor);
     }
+
+    BoundingVolume generateBoxFromObject() override {
+        return BoundingVolume(Vector3f(-INFINITY, -INFINITY, -INFINITY), Vector3f(INFINITY, INFINITY, INFINITY));
+    }
+
 
 protected:
     Object3D *o; //un-transformed object

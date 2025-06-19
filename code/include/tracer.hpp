@@ -466,7 +466,9 @@ private:
 // ========================
 class NEEedPathTracer {
 public:
-    NEEedPathTracer(const SceneParser* sceneParser,int SPP, const string& outputFile): _sceneParser(sceneParser), _SPP(SPP), _outputFile(outputFile){};
+    NEEedPathTracer(const SceneParser* sceneParser,int SPP, const string& outputFile): _sceneParser(sceneParser), _SPP(SPP), _outputFile(outputFile){
+         _sceneParser->getGroup()->initGroup();
+    };
 
     Vector3f trace(Ray ray) {
         Vector3f color = Vector3f::ZERO;
@@ -605,7 +607,9 @@ private:
 // ========================
 class GlossyPathTracer {
 public:
-    GlossyPathTracer(const SceneParser* sceneParser, int SPP, const string& outputFile): _sceneParser(sceneParser), _SPP(SPP), _outputFile(outputFile){};
+    GlossyPathTracer(const SceneParser* sceneParser, int SPP, const string& outputFile): _sceneParser(sceneParser), _SPP(SPP), _outputFile(outputFile){
+         _sceneParser->getGroup()->initGroup();
+    };
 
     Vector3f trace(Ray ray) {
         Vector3f color = Vector3f::ZERO;
@@ -708,6 +712,9 @@ public:
         int num_one_percent = totalPixels / 100;
         int processedPixels = 0;
 
+        // 获取并输出渲染开始时间
+        time_t startTime = time(NULL);
+
         for (int x = 0; x < width; x++) {
             for (int y = 0; y < height; y++) {
                 Vector3f finalColor(0, 0, 0);
@@ -731,6 +738,163 @@ public:
                 }
             }
         }
+        // 获取渲染结束时间并计算总时间
+        time_t endTime = time(NULL);
+        double duration = difftime(endTime, startTime); // 计算耗时（秒）
+        printf("Total rendering time: %.0f seconds\n", duration); // 输出总耗时
+
+        image.SaveBMP(_outputFile.c_str());
+        printf("\nSimplePathTracing: Finished rendering %s\n", _outputFile.c_str());
+    }
+
+private:
+    const SceneParser* _sceneParser;
+    int _SPP = 100;
+    std::string _outputFile;
+
+};
+
+
+// ========================
+// 实现 包围盒加速的 路径追踪器
+// ========================
+class BVHTracer {
+public:
+    BVHTracer(const SceneParser* sceneParser, int SPP, const string& outputFile): _sceneParser(sceneParser), _SPP(SPP), _outputFile(outputFile){
+        _sceneParser->getGroup()->initGroup();
+    };
+
+    Vector3f trace(Ray ray) {
+        Vector3f color = Vector3f::ZERO;
+        Vector3f throughput = Vector3f(1, 1, 1);
+
+        while (true) {
+            Hit hit;
+            if (!_sceneParser->getGroup()->intersectWithBVH(ray, hit, 0.001f)) {
+                color += _sceneParser->getBackgroundColor() * throughput;
+                break;
+            }
+
+            Material* material = hit.getMaterial();
+            Vector3f hitPoint = ray.pointAtParameter(hit.getT());
+            Vector3f normal = hit.getNormal().normalized();
+            Vector3f input = ray.direction.normalized();
+            Vector3f emitted = material->emissionColor;
+            Vector3f diffuse = material->diffuseColor;
+
+            // nee
+            if (material->type_d_rl_rr.x() != 0) {
+                if (emitted.x() == 0 && emitted.y() == 0 && emitted.z() == 0) {
+                    int numLights = _sceneParser->getNumEmissions();
+                    if (numLights > 0) {
+                        int lightIdx = std::floor(RandNum() * numLights);
+                        PointLight* light = _sceneParser->getLightFromEmission(lightIdx);
+
+                        Vector3f lightDir, lightColor;
+                        float lightDist;
+                        light->getIllumination(hitPoint, lightDir, lightColor, lightDist);
+
+                        // 修正影子光线方向
+                        Vector3f toLight = lightDir * lightDist;
+                        Ray shadowRay(hitPoint, lightDir);
+                        Hit shadowHit;
+                        bool occluded = _sceneParser->getGroup()->intersectWithBVH(shadowRay, shadowHit, 0.005f);
+
+                        if (!occluded || shadowHit.getT() >= lightDist - 0.05f) {
+                            float cosTheta = std::max(0.0f, Vector3f::dot(normal, lightDir));
+                            if (cosTheta > 0) {
+                                float lightCosTheta = std::max(0.0f, Vector3f::dot(-lightDir, light->normal));
+                                if (lightCosTheta > 0) {
+                                    float geoTerm = cosTheta * lightCosTheta / (lightDist * lightDist + 1e-6f);
+                                    float lightPdf = (light->area > 0) ? 1.0f / (numLights * light->area + 1e-6f) : 1.0f / (numLights * 1.0f + 1e-6f);
+                                    color += lightColor * diffuse * geoTerm * throughput / lightPdf / M_PI;
+                                }
+                            }
+                        }
+                        delete light;
+                    }
+                } else {
+                    // 自发光表面贡献
+                    color += diffuse * emitted * throughput / M_PI;
+                    // 漫反射时乘以 1/π 归一化 BRDF
+                }
+            }
+
+            double rate = RandNum();
+            Vector3f type = material->type_d_rl_rr;
+            Vector3f newdir;
+            if (material->shininess){// 处理 glossy 材质
+                newdir = glossyDir(ray.direction, normal, material->shininess);
+                Vector3f specular = glossy_BRDF(normal, -input, newdir, diffuse, material->shininess);
+                throughput = throughput * specular; // 更新通量
+            } else if (rate <= type.x()) { // 漫反射
+                newdir = diffuseDir(normal);
+            } else if (rate <= type.x() + type.y()) { // 反射
+                newdir = reflectDir(ray.direction, normal);
+            } else { // 折射
+                newdir = refractDir(ray.direction, normal, material->refr_rate);
+            }
+
+            ray.direction = newdir;
+
+            if (type.x() != 0) {
+                throughput *= std::abs(Vector3f::dot(ray.direction, normal));
+            }
+
+            throughput = throughput * diffuse;
+            ray.origin = hitPoint;
+
+            // 俄罗斯轮盘赌
+            float q = 0.1f; // 固定终止概率，可动态调整
+            double rouletteRand = RandNum(); // 新生成的随机数
+            if (rouletteRand < q) { // 以概率 q 终止
+                break;
+            }
+            throughput = throughput / (1 - q); // 补偿继续概率
+        }
+        return clamp(color);
+
+    }
+    void render() {
+        Camera* camera = _sceneParser->getCamera();
+        int width = camera->getWidth();
+        int height = camera->getHeight();
+        Image image = Image(width, height);
+
+        int totalPixels = width * height;
+        int num_one_percent = totalPixels / 100;
+        int processedPixels = 0;
+
+        // 获取并输出渲染开始时间
+        time_t startTime = time(NULL);
+
+        for (int x = 0; x < width; x++) {
+            for (int y = 0; y < height; y++) {
+                Vector3f finalColor(0, 0, 0);
+                for (int s = 0; s < _SPP; s++) {
+                    float u = (x + RandNum());
+                    float v = (y + RandNum());
+                    Ray ray = camera->generateRay(Vector2f(u, v));
+                    finalColor += trace(ray);
+                }
+                finalColor[0] /= _SPP;
+                finalColor[1] /= _SPP;
+                finalColor[2] /= _SPP;
+                image.SetPixel(x, y, finalColor);
+
+                // 更新进度并输出百分比
+                processedPixels++;
+                if (processedPixels % num_one_percent == 0){
+                    int percentage = (processedPixels * 100) / totalPixels;
+                    printf("\rRendering progress: %d%%", percentage);
+                    fflush(stdout); // 强制刷新输出，确保实时显示
+                }
+            }
+        }
+        // 获取渲染结束时间并计算总时间
+        time_t endTime = time(NULL);
+        double duration = difftime(endTime, startTime); // 计算耗时（秒）
+        printf("Total rendering time: %.0f seconds\n", duration); // 输出总耗时
 
         image.SaveBMP(_outputFile.c_str());
         printf("\nSimplePathTracing: Finished rendering %s\n", _outputFile.c_str());

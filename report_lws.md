@@ -14,3 +14,7 @@
         - 折射
         - 俄罗斯轮盘赌
     - 面光源（自发光材质
+- neepathracing
+- glossypathpacing
+- bvhpathpacing
+

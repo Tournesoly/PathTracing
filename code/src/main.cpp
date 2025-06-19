@@ -56,7 +56,9 @@ int main(int argc, char *argv[]) {
     }else if (tracerType == "glossy") {
         GlossyPathTracer tracer(&sceneParser, samplesPerPixel, outputFile);
         tracer.render();
-
+    }else if (tracerType == "bvh"){
+        BVHTracer tracer(&sceneParser, samplesPerPixel, outputFile);
+        tracer.render();
     } else {
         cerr << "Unknown tracer type: " << tracerType << endl;
         cout << "Available tracer types: whitted, simple, nee" << endl;
