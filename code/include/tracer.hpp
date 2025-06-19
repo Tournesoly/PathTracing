@@ -15,6 +15,13 @@
 
 using namespace std;
 
+Vector3f clamp(const Vector3f& color) {
+    const float maxValue = 10.0f;
+    float r = (color[0] > maxValue) ? maxValue : color[0];
+    float g = (color[1] > maxValue) ? maxValue : color[1];
+    float b = (color[2] > maxValue) ? maxValue : color[2];
+    return Vector3f(r, g, b);
+}
 
 Vector3f reflectDir(const Vector3f& I, const Vector3f& N) {
     // 标准化入射角度
@@ -461,195 +468,80 @@ class NEEedPathTracer {
 public:
     NEEedPathTracer(const SceneParser* sceneParser,int SPP, const string& outputFile): _sceneParser(sceneParser), _SPP(SPP), _outputFile(outputFile){};
 
-    // Vector3f trace(Ray ray) {
-    //     Vector3f color = Vector3f::ZERO;
-    //     Vector3f throughput = Vector3f(1, 1, 1);
-
-    //     while (true) {
-    //         Hit hit;
-    //         if (!_sceneParser->getGroup()->intersect(ray, hit, 0.001f)) {
-    //             color += _sceneParser->getBackgroundColor() * throughput;
-    //             break;
-    //         }
-
-    //         Material* material = hit.getMaterial();
-    //         Vector3f hitPoint = ray.pointAtParameter(hit.getT());
-    //         Vector3f normal = hit.getNormal().normalized();
-    //         Vector3f input = ray.direction.normalized();
-    //         Vector3f emitted = material->emissionColor;
-    //         Vector3f diffuse = material->diffuseColor;
-
-    //         // nee
-    //         if (material->type_d_rl_rr.x() != 0) {
-    //             if (emitted.x() == 0 && emitted.y() == 0 && emitted.z() == 0) {
-    //                 int numLights = _sceneParser->getNumEmissions();
-    //                 if (numLights > 0) {
-    //                     int lightIdx = std::floor(RandNum() * numLights);
-    //                     PointLight* light = _sceneParser->getLightFromEmission(lightIdx);
-
-    //                     Vector3f lightDir, lightColor;
-    //                     float lightDist;
-    //                     light->getIllumination(hitPoint, lightDir, lightColor, lightDist);
-
-    //                     // 修正影子光线方向
-    //                     Vector3f toLight = lightDir * lightDist;
-    //                     Ray shadowRay(hitPoint, lightDir);
-    //                     Hit shadowHit;
-    //                     bool occluded = _sceneParser->getGroup()->intersect(shadowRay, shadowHit, 0.01f);
-
-    //                     if (!occluded || shadowHit.getT() >= lightDist - 0.1f) {
-    //                         float cosTheta = std::max(0.0f, Vector3f::dot(normal, lightDir));
-    //                         if (cosTheta > 0) {
-    //                             float lightCosTheta = std::max(0.0f, Vector3f::dot(-lightDir, light->normal));
-    //                             if (lightCosTheta > 0) {
-    //                                 float geoTerm = cosTheta * lightCosTheta / (lightDist * lightDist + 1e-6f);
-    //                                 float lightPdf = (light->area > 0) ? 1.0f / (numLights * light->area + 1e-6f) : 1.0f / (numLights * 1.0f + 1e-6f);
-    //                                 color += lightColor * diffuse * geoTerm * throughput / lightPdf / M_PI;
-    //                             }
-    //                         }
-    //                     }
-    //                     delete light;
-    //                 }
-    //             } else {
-    //                 // 自发光表面贡献
-    //                 color += diffuse * emitted * throughput / M_PI;
-    //                 // 漫反射时乘以 1/π 归一化 BRDF
-    //             }
-    //         }
-
-    //         double rate = RandNum();
-    //         Vector3f type = material->type_d_rl_rr;
-    //         Vector3f newdir;
-    //         if (material->shininess){// 处理 glossy 材质
-    //             // newdir = glossyDir(ray.direction, normal, material->shininess);
-    //         } else if (rate <= type.x()) { // 漫反射
-    //             newdir = diffuseDir(normal);
-    //         } else if (rate <= type.x() + type.y()) { // 反射
-    //             newdir = reflectDir(ray.direction, normal);
-    //         } else { // 折射
-    //             newdir = refractDir(ray.direction, normal, material->refr_rate);
-    //         }
-
-    //         ray.direction = newdir;
-
-    //         if (type.x() != 0) {
-    //             throughput *= std::abs(Vector3f::dot(ray.direction, normal));
-    //         }
-
-    //         throughput = throughput * diffuse;
-    //         ray.origin = hitPoint;
-
-    //         // 俄罗斯轮盘赌
-    //         float q = 0.1f;
-    //         double rouletteRand = RandNum();
-    //         if (rouletteRand < q) {
-    //             break;
-    //         }
-    //         throughput = throughput / (1 - q);
-    //     }
-    //     return color;
-    // }
-
-    Vector3f trace(Ray Inputray) {
-        Ray ray = Inputray;
-        // 累积颜色
+    Vector3f trace(Ray ray) {
         Vector3f color = Vector3f::ZERO;
-        // 累积通量
         Vector3f throughput = Vector3f(1, 1, 1);
 
-
-        // 上次调用者
-        bool last_mirror = false;
-        bool last_glass = false;
-
-        while(true){
-            // 累积通量过小时停止循环
-            if (throughput.x() < 1e-6 && throughput.y() < 1e-6 && throughput.z() < 1e-6){
-                break;
-            }
-
-            // 不相交则停止循环
+        while (true) {
             Hit hit;
             if (!_sceneParser->getGroup()->intersect(ray, hit, 0.001f)) {
+                color += _sceneParser->getBackgroundColor() * throughput;
                 break;
             }
 
-            // 获取材质
             Material* material = hit.getMaterial();
-            // 获取击中点
             Vector3f hitPoint = ray.pointAtParameter(hit.getT());
-            // 获取法线
             Vector3f normal = hit.getNormal().normalized();
-            // 获取入射角度
             Vector3f input = ray.direction.normalized();
-            // 获取发光颜色
             Vector3f emitted = material->emissionColor;
-            // 获取漫反射颜色
             Vector3f diffuse = material->diffuseColor;
 
+            // nee
+            if (material->type_d_rl_rr.x() != 0) {
+                if (emitted.x() == 0 && emitted.y() == 0 && emitted.z() == 0) {
+                    int numLights = _sceneParser->getNumEmissions();
+                    if (numLights > 0) {
+                        int lightIdx = std::floor(RandNum() * numLights);
+                        PointLight* light = _sceneParser->getLightFromEmission(lightIdx);
 
-            // 随机获取出射方式
-            double rnd = RandNum();
-            // 获取材质属性
-            Vector3f type = material->type_d_rl_rr;
+                        Vector3f lightDir, lightColor;
+                        float lightDist;
+                        light->getIllumination(hitPoint, lightDir, lightColor, lightDist);
 
-            // NEE过程
-            if (type.x()!=0 && emitted.x() == 0 && emitted.y() ==0 && emitted.z() == 0){
-                // 采样光源
-                int lightnum = std::floor(RandNum() * _sceneParser->getNumEmissions());
-                Light *light = _sceneParser->getLightFromEmission(lightnum);
-                // 求交测试
-                Vector3f lightDir, lightColor;
-                float lightDistance;
-                light->getIllumination(hitPoint, lightDir, lightColor, lightDistance);
-                Ray shadowRay(light->position, -lightDir);
-                Hit shadowHit;
-                bool hitted = _sceneParser->getGroup()->intersect(shadowRay, shadowHit, 0.01f);
-                if (!hitted || shadowHit.getT()+0.1 >= lightDistance) {
-                    // 击中表面余弦
-                    float suf_cos = Vector3f::dot(lightDir, normal)>0?Vector3f::dot(lightDir, normal):-Vector3f::dot(lightDir, normal);
-                    // 光源pdf
-                    float light_pdf = 1.0 / (_sceneParser->getNumEmissions() * light->area);
-                    // 光源表面余弦
-                    float light_cos =  Vector3f::dot(lightDir, light->normal)>0?Vector3f::dot(lightDir, light->normal):-Vector3f::dot(lightDir, light->normal);
-                    // 几何项
-                    float geo = suf_cos * light_cos / (lightDistance * lightDistance);
-                    // 累积贡献
-                    color += lightColor * diffuse * geo * throughput / light_pdf / M_PI;
-                }
-                delete light;
-            }
-            if (material->shininess){
-                // do nothing
-            }
-            else if (rnd <= type.x()) {// 漫反射
-                ray.direction = diffuseDir(normal);
-                last_mirror = false;
-                last_glass = false;
-            } else if (rnd <= type.x() + type.y()) {// 镜面反射
-                ray.direction = reflectDir(ray.direction, normal);
-                last_mirror = true;
-                last_glass = false;
-            } else {// 折射
-                Vector3f newdir = refractDir(ray.direction, normal, material->refr_rate);
-                if (Vector3f::dot(ray.direction, normal) * Vector3f::dot(newdir, normal)> 0){
-                    last_mirror = false;
-                    last_glass = true;
+                        // 修正影子光线方向
+                        Vector3f toLight = lightDir * lightDist;
+                        Ray shadowRay(hitPoint, lightDir);
+                        Hit shadowHit;
+                        bool occluded = _sceneParser->getGroup()->intersect(shadowRay, shadowHit, 0.01f);
+
+                        if (!occluded || shadowHit.getT() >= lightDist - 0.1f) {
+                            float cosTheta = std::max(0.0f, Vector3f::dot(normal, lightDir));
+                            if (cosTheta > 0) {
+                                float lightCosTheta = std::max(0.0f, Vector3f::dot(-lightDir, light->normal));
+                                if (lightCosTheta > 0) {
+                                    float geoTerm = cosTheta * lightCosTheta / (lightDist * lightDist + 1e-6f);
+                                    float lightPdf = (light->area > 0) ? 1.0f / (numLights * light->area + 1e-6f) : 1.0f / (numLights * 1.0f + 1e-6f);
+                                    color += lightColor * diffuse * geoTerm * throughput / lightPdf / M_PI;
+                                }
+                            }
+                        }
+                        delete light;
+                    }
                 } else {
-                    last_mirror = true;
-                    last_glass = false;
+                    // 自发光表面贡献
+                    color += diffuse * emitted * throughput / M_PI;
+                    // 漫反射时乘以 1/π 归一化 BRDF
                 }
-                ray.direction = newdir;
             }
 
-            // 漫反射余弦权重抵消
-            if (type.x()!=0){
-                throughput *= (Vector3f::dot(ray.direction, normal)>0?Vector3f::dot(ray.direction, normal):-Vector3f::dot(ray.direction, normal));
+            double rate = RandNum();
+            Vector3f type = material->type_d_rl_rr;
+            Vector3f newdir;
+            if (rate <= type.x()) { // 漫反射
+                newdir = diffuseDir(normal);
+            } else if (rate <= type.x() + type.y()) { // 反射
+                newdir = reflectDir(ray.direction, normal);
+            } else { // 折射
+                newdir = refractDir(ray.direction, normal, material->refr_rate);
             }
 
-            // 更新通量
+            ray.direction = newdir;
+
+            if (type.x() != 0) {
+                throughput *= std::abs(Vector3f::dot(ray.direction, normal));
+            }
+
             throughput = throughput * diffuse;
-            // 重置起点
             ray.origin = hitPoint;
 
             // 俄罗斯轮盘赌
@@ -660,8 +552,9 @@ public:
             }
             throughput = throughput / (1 - q);
         }
-        return color;
+        return clamp(color);
     }
+
     void render() {
         Camera* camera = _sceneParser->getCamera();
         int width = camera->getWidth();
@@ -802,7 +695,7 @@ public:
             }
             throughput = throughput / (1 - q); // 补偿继续概率
         }
-        return color;
+        return clamp(color);
 
     }
     void render() {
